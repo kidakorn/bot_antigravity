@@ -1,0 +1,12 @@
+# Google Cloud Credentials (ไฟล์ที่โดนบล็อก)
+service_account.json
+
+# Python environments & cache
+__pycache__/
+*.py[cod]
+venv/
+.env
+.env.example
+
+# IDE settings
+.vscode/
