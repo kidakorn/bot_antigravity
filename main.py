@@ -1,14 +1,12 @@
-"""
-OpenClaw V7 — Main Bot Loop
-Exness Cent | XAUUSDc M5/H1 | Windows VPS + Watchdog
+# -*- coding: utf-8 -*-
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-Features:
-  - Smart Sleep: นอก session → sleep ยาว ประหยัด CPU
-  - BotState persistence: restart ไม่ duplicate trade
-  - Sheets async queue: logging ไม่ block main loop
-  - Dynamic deviation: ตาม ATR ไม่ใช่ fixed
-  - HTF H1: NEUTRAL ลด score, ไม่ block ทั้งหมด
-  - Asian + London + NY session support
+"""
+OpenClaw V7.2 — Main Bot Loop
+M15 entry | H4 HTF | Candle Close Wait | Bounce Guard
 """
 import time
 from datetime import date, datetime, timedelta
@@ -48,11 +46,27 @@ from sheets_logger import (
 from strategy import assess_htf_trend, decide_signal
 from utils import safe_float
 
-# ─────────────────────────────────────────────
-# State
-# ─────────────────────────────────────────────
 STATE = BotState.load_or_new()
 LAST_MARKET_STATUS: str | None = None
+
+
+# ─────────────────────────────────────────────
+# Candle Close Timer
+# รอให้ candle M15 ปิดก่อนเข้า trade
+# ─────────────────────────────────────────────
+
+def _seconds_to_candle_close(now: datetime, tf_minutes: int = 15) -> int:
+    """วินาทีที่เหลือจนกว่า candle จะปิด"""
+    tf_sec    = tf_minutes * 60
+    elapsed   = (now.minute % tf_minutes) * 60 + now.second
+    remaining = tf_sec - elapsed
+    return remaining
+
+
+def _near_candle_close(now: datetime, tf_minutes: int = 15) -> bool:
+    """True ถ้าเหลือน้อยกว่า CANDLE_CLOSE_WAIT_SEC วิก่อน candle close"""
+    remaining = _seconds_to_candle_close(now, tf_minutes)
+    return remaining <= cfg.CANDLE_CLOSE_WAIT_SEC
 
 
 # ─────────────────────────────────────────────
@@ -68,44 +82,37 @@ def _in_any_session(now: datetime) -> bool:
     ]
     for start, end in sessions:
         if start <= end:
-            if start <= t <= end:
-                return True
+            if start <= t <= end: return True
         else:
-            if t >= start or t <= end:
-                return True
+            if t >= start or t <= end: return True
     return False
 
 
 def _seconds_to_next_session(now: datetime) -> int:
-    starts = [
-        dtime(*cfg.AI_ASIAN_START_HHMM),
-        dtime(*cfg.AI_LONDON_START_HHMM),
-        dtime(*cfg.AI_NY_START_HHMM),
-    ]
+    starts  = [dtime(*cfg.AI_ASIAN_START_HHMM),
+               dtime(*cfg.AI_LONDON_START_HHMM),
+               dtime(*cfg.AI_NY_START_HHMM)]
     min_wait = 8 * 3600
     for s in starts:
         target = now.replace(hour=s.hour, minute=s.minute, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
+        if target <= now: target += timedelta(days=1)
         wait = int((target - now).total_seconds())
-        if wait < min_wait:
-            min_wait = wait
+        if wait < min_wait: min_wait = wait
     return max(60, min_wait)
 
 
-def smart_sleep(now: datetime, default_sec: int = 10) -> None:
-    """ใน session = sleep ปกติ | นอก session = sleep จนถึง session ถัดไป"""
+def smart_sleep(now: datetime, default_sec: int = 15) -> None:
     if _in_any_session(now):
         time.sleep(default_sec)
         return
     wait = _seconds_to_next_session(now)
     if STATE.should_log("off_session_sleep", 1800):
         next_dt = datetime.now() + timedelta(seconds=wait)
-        print(f"[bot] นอก session — sleep {wait // 60} นาที → {next_dt.strftime('%H:%M')}")
+        print(f"[bot] off-session — sleep {wait // 60} min -> {next_dt.strftime('%H:%M')}")
         log_event({"event": "off_session_sleep",
                    "sleep_min": wait // 60,
                    "next_session": next_dt.strftime("%H:%M")})
-    time.sleep(min(wait, 3600))  # wake ทุก 1 ชม. เพื่อ health check
+    time.sleep(min(wait, 3600))
 
 
 # ─────────────────────────────────────────────
@@ -148,7 +155,7 @@ def reset_daily():
 
 
 # ─────────────────────────────────────────────
-# MT5 health
+# MT5
 # ─────────────────────────────────────────────
 
 def ensure_mt5_alive() -> bool:
@@ -158,10 +165,8 @@ def ensure_mt5_alive() -> bool:
                 STATE.exit_safe_mode()
                 log_event({"event": "safe_mode_exit", "reason": "mt5 restored"})
             return True
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        try: mt5.shutdown()
+        except Exception: pass
         connect()
         ensure_symbol(cfg.SYMBOL)
         if mt5.terminal_info() is not None and mt5.account_info() is not None:
@@ -175,31 +180,21 @@ def ensure_mt5_alive() -> bool:
         return False
 
 
-# ─────────────────────────────────────────────
-# Market open
-# ─────────────────────────────────────────────
-
 def is_market_open() -> tuple[bool, str]:
     info = mt5.symbol_info(cfg.SYMBOL)
-    if info is None:
-        return False, "symbol_info_none"
+    if info is None: return False, "symbol_info_none"
     try:
-        if not getattr(info, "visible", True):
-            mt5.symbol_select(cfg.SYMBOL, True)
-    except Exception:
-        pass
-    if int(getattr(info, "trade_mode", 0) or 0) == 0:
-        return False, "trade_disabled"
+        if not getattr(info, "visible", True): mt5.symbol_select(cfg.SYMBOL, True)
+    except Exception: pass
+    if int(getattr(info, "trade_mode", 0) or 0) == 0: return False, "trade_disabled"
     tick = mt5.symbol_info_tick(cfg.SYMBOL)
-    if tick is None:
-        return False, "no_tick"
-    if float(getattr(tick, "bid", 0.0) or 0.0) <= 0:
-        return False, "no_valid_prices"
+    if tick is None: return False, "no_tick"
+    if float(getattr(tick, "bid", 0.0) or 0.0) <= 0: return False, "no_valid_prices"
     return True, "ok"
 
 
 # ─────────────────────────────────────────────
-# Order helpers
+# Order
 # ─────────────────────────────────────────────
 
 def _normalize_volume(lot: float, info) -> float:
@@ -225,16 +220,14 @@ def _normalize_stops(action: str, entry: float, sl: float, tp: float, info):
 
 
 def _dynamic_deviation(atr_val: float, point: float) -> int:
-    if point <= 0 or atr_val <= 0:
-        return 40
+    if point <= 0 or atr_val <= 0: return 40
     return max(20, min(int(atr_val / point * 0.25), 80))
 
 
 def place_order(action: str, lot: float, sl: float, tp: float, atr_val: float = 0.0):
     info = mt5.symbol_info(cfg.SYMBOL)
     tick = mt5.symbol_info_tick(cfg.SYMBOL)
-    if info is None or tick is None:
-        return None, "symbol_or_tick_missing"
+    if info is None or tick is None: return None, "symbol_or_tick_missing"
 
     price      = tick.ask if action == "BUY" else tick.bid
     sl, tp     = _normalize_stops(action, price, sl, tp, info)
@@ -254,7 +247,7 @@ def place_order(action: str, lot: float, sl: float, tp: float, atr_val: float = 
             "tp":           float(tp),
             "deviation":    deviation,
             "magic":        cfg.MAGIC,
-            "comment":      "OpenClaw-V7",
+            "comment":      "OpenClaw-V7.2",
             "type_time":    mt5.ORDER_TIME_GTC,
             "type_filling": filling,
         })
@@ -265,7 +258,6 @@ def place_order(action: str, lot: float, sl: float, tp: float, atr_val: float = 
         if result.retcode == mt5.TRADE_RETCODE_DONE:
             return result, f"ok filling={filling}"
         last_status = f"retcode={result.retcode} filling={filling}"
-
     return last_result, last_status
 
 
@@ -278,7 +270,7 @@ def main():
 
     connect()
     ensure_symbol(cfg.SYMBOL)
-    print("OpenClaw V7 starting...")
+    print("OpenClaw V7.2 starting...")
 
     start_log_worker(cfg.GOOGLE_CREDS_JSON, cfg.SHEET_ID, cfg.SHEET_TAB)
     ensure_sheet_header(cfg.GOOGLE_CREDS_JSON, cfg.SHEET_ID, cfg.SHEET_TAB)
@@ -288,11 +280,11 @@ def main():
             trim_sheet_logs(cfg.GOOGLE_CREDS_JSON, cfg.SHEET_ID, cfg.SHEET_TAB,
                             keep_last_rows=cfg.SHEET_KEEP_LAST_ROWS)
         except Exception as e:
-            print(f"[sheets] startup trim error: {e}")
+            print(f"[sheets] startup trim: {e}")
 
     notify_telegram(
         cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
-        f"🚀 <b>OpenClaw V7</b> started\n{cfg.SYMBOL} | {cfg.TIMEFRAME} | HTF {cfg.HTF_TIMEFRAME}"
+        f"<b>OpenClaw V7.2</b> started\n{cfg.SYMBOL} | {cfg.TIMEFRAME} | HTF {cfg.HTF_TIMEFRAME}"
     )
     log_event({"event": "bot_start"})
 
@@ -301,7 +293,7 @@ def main():
             reset_daily()
             now = datetime.now()
 
-            # 1. MT5 connection
+            # 1. MT5
             if not ensure_mt5_alive():
                 STATE.consecutive_mt5_failures += 1
                 if STATE.consecutive_mt5_failures >= cfg.SAFE_MODE_MAX_MT5_FAILS:
@@ -316,17 +308,23 @@ def main():
                 if LAST_MARKET_STATUS != "closed":
                     log_event({"event": "market_closed", "reason": market_reason})
                     LAST_MARKET_STATUS = "closed"
-                time.sleep(cfg.MARKET_CLOSED_SLEEP_SEC)
+                # วันเสาร์-อาทิตย์ sleep 1 ชม. แทน loop ถี่
+                if now.weekday() in (5, 6):  # 5=Sat, 6=Sun
+                    if STATE.should_log("weekend_sleep", 3600):
+                        print(f"[bot] weekend — market closed, sleeping 1hr")
+                    time.sleep(3600)
+                else:
+                    time.sleep(cfg.MARKET_CLOSED_SLEEP_SEC)
                 continue
             if LAST_MARKET_STATUS != "open":
                 log_event({"event": "market_open"})
                 LAST_MARKET_STATUS = "open"
 
-            # 3. Health snapshot
+            # 3. Health
             if cfg.LOG_HEALTH_SNAPSHOT and STATE.should_log("health", cfg.HEALTH_LOG_EVERY_SEC):
                 log_health_snapshot(STATE, cfg.SYMBOL, cfg.TIMEFRAME, get_rates, log_event)
 
-            # 4. Scan closed trades
+            # 4. Closed trades scan
             if STATE.should_log("closed_scan", cfg.CLOSED_TRADE_SCAN_EVERY_SEC):
                 scan_closed_trades(STATE, cfg.MAGIC, cfg.SYMBOL, log_event)
 
@@ -334,15 +332,14 @@ def main():
                 time.sleep(cfg.SAFE_MODE_RETRY_SEC)
                 continue
 
-            # 5. Pause (loss streak)
+            # 5. Pause
             if STATE.pause_active(now):
                 if cfg.LOG_PAUSE_STATE and STATE.should_log("pause", 120):
-                    log_event({"event": "pause_active", "reason": STATE.pause_reason,
-                               "pause_until": STATE.pause_until.isoformat()})
+                    log_event({"event": "pause_active", "reason": STATE.pause_reason})
                 time.sleep(30)
                 continue
 
-            # 6. News block
+            # 6. News
             manual_block, manual_reason = is_in_news_blackout(
                 now, cfg.NEWS_BLACKOUT_ENABLED, cfg.NEWS_BLACKOUT_WINDOWS,
                 cfg.NEWS_BUFFER_MIN_BEFORE, cfg.NEWS_BUFFER_MIN_AFTER,
@@ -355,7 +352,7 @@ def main():
                 time.sleep(60)
                 continue
 
-            # 7. Spread check
+            # 7. Spread
             sp = spread_points(cfg.SYMBOL)
             if sp > cfg.MAX_SPREAD_POINTS:
                 if cfg.LOG_SKIP_SPREAD and STATE.should_log("spread", 120):
@@ -363,7 +360,7 @@ def main():
                 smart_sleep(now)
                 continue
 
-            # 8. Account checks
+            # 8. Account
             acc = mt5.account_info()
             if acc is None:
                 time.sleep(10)
@@ -382,7 +379,8 @@ def main():
             profit_today, cons_losses = today_deals_profit(cfg.MAGIC)
             if profit_today <= -(balance * cfg.MAX_DAILY_LOSS_PCT):
                 log_event({"event": "halt_daily_loss",
-                           "balance": round(balance, 2), "profit_today": round(profit_today, 2)})
+                           "balance": round(balance, 2),
+                           "profit_today": round(profit_today, 2)})
                 time.sleep(60)
                 continue
 
@@ -393,13 +391,13 @@ def main():
                 time.sleep(30)
                 continue
 
-            # 9. Position management (trailing / BE / partial TP)
+            # 9. Position management
             positions = positions_by_magic(cfg.SYMBOL, cfg.MAGIC)
             if positions:
                 if STATE.can_trail(now, cfg.TRAILING_CHECK_EVERY_SEC):
                     info_sym = mt5.symbol_info(cfg.SYMBOL)
                     if info_sym:
-                        df_m  = get_rates(cfg.SYMBOL, cfg.TIMEFRAME, 400)
+                        df_m  = get_rates(cfg.SYMBOL, cfg.TIMEFRAME, 300)
                         dyn_m = compute_dynamic_trade_params(
                             df=df_m, entry_type="continuation", final_score=65,
                             point=float(info_sym.point),
@@ -408,8 +406,7 @@ def main():
                         )
                         trail_positions_atr(
                             cfg.SYMBOL, cfg.MAGIC, df_m,
-                            cfg.TRAILING_ENABLED,
-                            dyn_m["trailing_atr_mult"],
+                            cfg.TRAILING_ENABLED, dyn_m["trailing_atr_mult"],
                             breakeven_enabled=cfg.BREAKEVEN_ENABLED,
                             breakeven_trigger_atr=dyn_m["breakeven_trigger_atr"],
                             breakeven_lock_points=cfg.BREAKEVEN_LOCK_POINTS,
@@ -420,18 +417,29 @@ def main():
                             partial_taken_positions=STATE.partial_taken_positions,
                         )
                         STATE.mark_trail(now)
-                time.sleep(10)  # trail ถี่ = sleep 10 วิเสมอ
+                time.sleep(cfg.TRAILING_CHECK_EVERY_SEC)
                 continue
 
-            # 10. Max trades/day
+            # 10. Max trades
             if STATE.trades_today >= cfg.MAX_TRADES_PER_DAY:
                 if STATE.should_log("max_trades", 600):
-                    log_event({"event": "max_trades_reached", "trades_today": STATE.trades_today})
+                    log_event({"event": "max_trades_reached",
+                               "trades_today": STATE.trades_today})
                 smart_sleep(now, 60)
                 continue
 
-            # 11. Get signal
-            df     = get_rates(cfg.SYMBOL, cfg.TIMEFRAME, 400)
+            # ── Candle Close Wait ──────────────────
+            # รอให้ candle M15 เกือบปิดก่อน evaluate signal
+            tf_min = 15  # M15
+            remaining = _seconds_to_candle_close(now, tf_min)
+            if remaining > cfg.CANDLE_CLOSE_WAIT_SEC:
+                # ยังไม่ถึงเวลา — sleep ไปก่อน
+                sleep_time = min(remaining - cfg.CANDLE_CLOSE_WAIT_SEC, 30)
+                time.sleep(max(5, sleep_time))
+                continue
+
+            # 11. Signal
+            df     = get_rates(cfg.SYMBOL, cfg.TIMEFRAME, 300)
             df_htf = get_rates(cfg.SYMBOL, cfg.HTF_TIMEFRAME, 300)
             sig    = decide_signal(df)
             htf    = assess_htf_trend(df_htf)
@@ -442,45 +450,45 @@ def main():
                 if cfg.LOG_NO_SETUP and STATE.should_log("no_setup", cfg.INFO_LOG_EVERY_SEC):
                     log_event({"event": "no_setup", "score": sig.score,
                                "reason": sig.reason, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
-            # 12. HTF filter
+            # 12. HTF H4 filter
             htf_penalty = 0
             if htf.mode == "NONE":
                 if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_none", 120):
                     log_event({"event": "blocked_htf_none", "signal": sig.action,
                                "reason": htf.reason, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
             if htf.mode == "NEUTRAL":
-                htf_penalty = -8  # ลด score แต่ไม่ block
+                htf_penalty = -5
 
             if sig.action == "BUY" and htf.mode == "SELL_ONLY":
                 if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_conflict", 120):
                     log_event({"event": "blocked_htf_conflict", "signal": "BUY",
                                "htf": htf.mode, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
             if sig.action == "SELL" and htf.mode == "BUY_ONLY":
                 if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_conflict", 120):
                     log_event({"event": "blocked_htf_conflict", "signal": "SELL",
                                "htf": htf.mode, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
-            # 13. Duplicate setup guard
-            bars_min = cfg.SAME_DIRECTION_REENTRY_BARS * 5
+            # 13. Duplicate
+            bars_min = cfg.SAME_DIRECTION_REENTRY_BARS * 15
             if STATE.is_duplicate_setup(sig.setup_key, now, bars_min):
                 if cfg.LOG_DUPLICATE_SETUP and STATE.should_log("dup_setup", 60):
                     log_event({"event": "duplicate_setup",
                                "setup_key": sig.setup_key, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
-            # 14. AI evaluation
+            # 14. AI
             base_score  = sig.score + htf_penalty
             ai_allow    = True
             ai_reason   = "AI disabled"
@@ -497,25 +505,25 @@ def main():
                     vol_enabled=cfg.AI_VOL_FILTER,
                     trend_strength_enabled=cfg.AI_TREND_STRENGTH,
                     london=(*cfg.AI_LONDON_START_HHMM, *cfg.AI_LONDON_END_HHMM),
-                    ny=(*cfg.AI_NY_START_HHMM,     *cfg.AI_NY_END_HHMM),
-                    asian=(*cfg.AI_ASIAN_START_HHMM, *cfg.AI_ASIAN_END_HHMM),
+                    ny=(*cfg.AI_NY_START_HHMM,         *cfg.AI_NY_END_HHMM),
+                    asian=(*cfg.AI_ASIAN_START_HHMM,   *cfg.AI_ASIAN_END_HHMM),
                 )
 
             if not ai_allow:
                 if cfg.LOG_BLOCKED_AI and STATE.should_log("blocked_ai", 120):
                     log_event({"event": "blocked_ai", "signal": sig.action,
                                "score": final_score, "reason": ai_reason, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
             if final_score < cfg.MIN_SCORE_TO_TRADE:
                 if cfg.LOG_BLOCKED_SCORE and STATE.should_log("blocked_score", 120):
                     log_event({"event": "blocked_score", "signal": sig.action,
                                "score": final_score, "reason": sig.reason, **ctx})
-                smart_sleep(now)
+                time.sleep(15)
                 continue
 
-            # 15. Dynamic SL/TP
+            # 15. SL/TP
             info_sym = mt5.symbol_info(cfg.SYMBOL)
             tick_sym = mt5.symbol_info_tick(cfg.SYMBOL)
             if info_sym is None or tick_sym is None:
@@ -536,7 +544,8 @@ def main():
             lot   = calc_lot(cfg.SYMBOL, cfg.RISK_PCT, sl_pts, cfg.MIN_LOT, cfg.MAX_LOT)
             lot   = _normalize_volume(lot, info_sym)
             entry = tick_sym.ask if sig.action == "BUY" else tick_sym.bid
-            sl, tp = sl_tp_from_points(entry, sig.action, sl_pts, tp_pts, float(info_sym.point))
+            sl, tp = sl_tp_from_points(entry, sig.action, sl_pts, tp_pts,
+                                        float(info_sym.point))
 
             log_event({
                 "event":       "trade_attempt",
@@ -551,7 +560,7 @@ def main():
                 "spread":      sp,
             })
 
-            # 16. Place order
+            # 16. Order
             result, status = place_order(sig.action, lot, sl, tp, dyn["atr14"])
 
             if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
@@ -567,9 +576,9 @@ def main():
                 })
                 notify_telegram(
                     cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
-                    (f"✅ <b>OPEN {sig.action}</b> {cfg.SYMBOL}\n"
+                    (f"<b>OPEN {sig.action}</b> {cfg.SYMBOL}\n"
                      f"type={sig.entry_type} | lot={lot} | score={final_score}\n"
-                     f"SL×{dyn['sl_atr_mult']} | RR={dyn['tp_rr']} | {sig.reason}")
+                     f"SL x{dyn['sl_atr_mult']} | RR={dyn['tp_rr']} | {sig.reason}")
                 )
             else:
                 log_event({
@@ -581,7 +590,7 @@ def main():
                     "close_price": safe_float(entry),
                 })
 
-            time.sleep(10)
+            time.sleep(15)
 
         except KeyboardInterrupt:
             print("\n[bot] stopped by user")
@@ -591,7 +600,7 @@ def main():
             print(f"[bot] ERROR: {e}")
             if STATE.should_log("bot_error", 60):
                 log_event({"event": "bot_error", "reason": str(e)})
-            time.sleep(10)
+            time.sleep(15)
 
     shutdown()
     print("[bot] shutdown complete")

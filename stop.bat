@@ -2,7 +2,6 @@
 title Stop OpenClaw V7
 echo [%date% %time%] Stopping OpenClaw V7...
 
-:: หยุด python ทั้งหมด (watchdog + main)
 taskkill /f /im python.exe >nul 2>&1
 taskkill /f /im pythonw.exe >nul 2>&1
 

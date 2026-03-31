@@ -1,6 +1,13 @@
 """
-OpenClaw V7 — Config
-Exness Cent Account | XAUUSDc M5 | Windows VPS
+OpenClaw V7.2 — Config
+Exness Cent | XAUUSDc M15 entry | H4 HTF | Windows VPS Singapore UTC+8
+
+v7.2:
+  - TIMEFRAME M5 → M15
+  - HTF H1 → H4
+  - รอ candle close ก่อนเข้า
+  - ลด filter เหลือ EMA+MACD+RSI
+  - BOUNCE_GUARD คง (ป้องกันสวนเทรนด์)
 """
 import os
 from dotenv import load_dotenv
@@ -9,17 +16,17 @@ load_dotenv()
 
 # ── Instrument ────────────────────────────────
 SYMBOL            : str   = "XAUUSDc"
-TIMEFRAME         : str   = "M5"
-HTF_TIMEFRAME     : str   = "H1"
+TIMEFRAME         : str   = "M15"
+HTF_TIMEFRAME     : str   = "H4"
 MAGIC             : int   = 20260324
 
 # ── Risk ──────────────────────────────────────
-RISK_PCT          : float = 0.010     # 1% / trade (~15 USC บนพอร์ต 1,500 USC)
+RISK_PCT          : float = 0.020   # 2% -> ~34 USC lot
 MIN_LOT           : float = 0.01
 MAX_LOT           : float = 1.00
 MAX_SPREAD_POINTS : int   = 400
 MAX_OPEN_TRADES   : int   = 1
-MAX_TRADES_PER_DAY: int   = 99
+MAX_TRADES_PER_DAY: int   = 8
 COOLDOWN_MINUTES  : int   = 0
 
 MAX_DAILY_LOSS_PCT       : float = 0.05
@@ -33,60 +40,66 @@ LOSS_STREAK_PAUSE_MINUTES : int = 120
 # ── Entry Quality ─────────────────────────────
 REQUIRE_NEW_SETUP           : bool = True
 SAME_DIRECTION_REENTRY_BARS : int  = 1
-MIN_SCORE_TO_TRADE          : int  = 58
+MIN_SCORE_TO_TRADE          : int  = 50
 
-# ── SL/TP Fallback ────────────────────────────
-SL_ATR_MULT : float = 1.30
-TP_RR       : float = 1.25
+# ── Candle Close Wait ─────────────────────────
+CANDLE_CLOSE_WAIT_SEC : int = 5  # เข้าได้เมื่อเหลือ < 5 วิก่อน candle close
 
-# ── Strategy Tuning ───────────────────────────
-PULLBACK_ZONE_ATR_MULT     : float = 1.10
-CONTINUATION_ZONE_ATR_MULT : float = 0.85
+# ── Bounce Guard ──────────────────────────────
+BOUNCE_GUARD_BARS     : int   = 2
+BOUNCE_GUARD_ATR_MULT : float = 2.0
 
-PULLBACK_RSI_BUY_MIN  : int = 40
-PULLBACK_RSI_BUY_MAX  : int = 68
-PULLBACK_RSI_SELL_MIN : int = 32
-PULLBACK_RSI_SELL_MAX : int = 60
+# ── SL/TP ─────────────────────────────────────
+SL_ATR_MULT : float = 1.50
+TP_RR       : float = 1.50
 
-CONTINUATION_RSI_BUY_MIN  : int = 50
-CONTINUATION_RSI_BUY_MAX  : int = 74
-CONTINUATION_RSI_SELL_MIN : int = 26
-CONTINUATION_RSI_SELL_MAX : int = 50
+# ── Strategy ──────────────────────────────────
+PULLBACK_ZONE_ATR_MULT     : float = 1.60
+CONTINUATION_ZONE_ATR_MULT : float = 1.25
+
+PULLBACK_RSI_BUY_MIN  : int = 38
+PULLBACK_RSI_BUY_MAX  : int = 72
+PULLBACK_RSI_SELL_MIN : int = 28
+PULLBACK_RSI_SELL_MAX : int = 62
+
+CONTINUATION_RSI_BUY_MIN  : int = 45
+CONTINUATION_RSI_BUY_MAX  : int = 75
+CONTINUATION_RSI_SELL_MIN : int = 25
+CONTINUATION_RSI_SELL_MAX : int = 55
 
 # ── Profit Protection ─────────────────────────
 TRAILING_ENABLED        : bool  = True
-TRAILING_ATR_MULT       : float = 0.60
-TRAILING_CHECK_EVERY_SEC: int   = 10
-TRAILING_START_ATR      : float = 0.55
+TRAILING_ATR_MULT       : float = 0.65
+TRAILING_CHECK_EVERY_SEC: int   = 15
+TRAILING_START_ATR      : float = 0.60
 
 BREAKEVEN_ENABLED     : bool  = True
-BREAKEVEN_TRIGGER_ATR : float = 0.40
-BREAKEVEN_LOCK_POINTS : int   = 15
+BREAKEVEN_TRIGGER_ATR : float = 0.45
+BREAKEVEN_LOCK_POINTS : int   = 20
 
 PARTIAL_TP_ENABLED   : bool  = True
-PARTIAL_TP_TRIGGER_R : float = 0.65
+PARTIAL_TP_TRIGGER_R : float = 0.70
 PARTIAL_TP_CLOSE_PCT : float = 0.50
 
-# ── AI / Session ──────────────────────────────
+# ── AI / Session UTC+8 ────────────────────────
 OPENCLAW_AI_ENABLED : bool = True
 AI_SESSION_FILTER   : bool = True
 AI_REGIME_FILTER    : bool = True
 AI_VOL_FILTER       : bool = True
 AI_TREND_STRENGTH   : bool = True
 
-# เวลาไทย UTC+7
-AI_ASIAN_START_HHMM  : tuple = (8,  0)
-AI_ASIAN_END_HHMM    : tuple = (12, 0)
-AI_LONDON_START_HHMM : tuple = (14, 0)
-AI_LONDON_END_HHMM   : tuple = (20, 0)
-AI_NY_START_HHMM     : tuple = (19, 30)
+AI_ASIAN_START_HHMM  : tuple = (9,  0)
+AI_ASIAN_END_HHMM    : tuple = (13, 0)
+AI_LONDON_START_HHMM : tuple = (15, 0)
+AI_LONDON_END_HHMM   : tuple = (21, 0)
+AI_NY_START_HHMM     : tuple = (20, 30)
 AI_NY_END_HHMM       : tuple = (23, 59)
 
 # ── News Blackout ─────────────────────────────
-NEWS_BLACKOUT_ENABLED  : bool  = True
-NEWS_BLACKOUT_WINDOWS  : list  = []
-NEWS_BUFFER_MIN_BEFORE : int   = 15
-NEWS_BUFFER_MIN_AFTER  : int   = 15
+NEWS_BLACKOUT_ENABLED  : bool = True
+NEWS_BLACKOUT_WINDOWS  : list = []
+NEWS_BUFFER_MIN_BEFORE : int  = 15
+NEWS_BUFFER_MIN_AFTER  : int  = 30
 
 # ── Google Sheets ─────────────────────────────
 SHEET_ID           : str  = os.getenv("OPENCLAW_SHEET_ID", "")
@@ -104,16 +117,16 @@ TELEGRAM_CHAT_ID   : str  = os.getenv("OPENCLAW_TELEGRAM_CHAT_ID", "")
 # ── Stability ─────────────────────────────────
 SAFE_MODE_MAX_MT5_FAILS : int = 3
 SAFE_MODE_RETRY_SEC     : int = 60
-MARKET_CLOSED_SLEEP_SEC : int = 120
+MARKET_CLOSED_SLEEP_SEC : int = 3600  # 1 ชม.
 ORDER_FAIL_RETRY_SEC    : int = 120
 
 # ── Logging ───────────────────────────────────
-INFO_LOG_EVERY_SEC          : int  = 300
+INFO_LOG_EVERY_SEC          : int  = 600   # 10 นาที
 HEALTH_LOG_EVERY_SEC        : int  = 1800
 CLOSED_TRADE_SCAN_EVERY_SEC : int  = 30
 DAILY_SUMMARY_ON_ROLLOVER   : bool = True
 
-LOG_NO_SETUP        : bool = True
+LOG_NO_SETUP        : bool = False  # ปิด no_setup log ลดขยะ
 LOG_BLOCKED_AI      : bool = True
 LOG_BLOCKED_SCORE   : bool = True
 LOG_SKIP_SPREAD     : bool = True

@@ -1,6 +1,6 @@
 """
 OpenClaw V7 - News Filter
-ปรับปรุง: เพิ่ม buffer ±15 นาที (V7 default), เพิ่ม medium impact option
+Cache 4 hours to avoid 429 Too Many Requests
 """
 from datetime import datetime, timedelta, timezone
 import threading
@@ -8,9 +8,9 @@ import threading
 import pandas as pd
 import requests
 
-FF_URL            = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-FETCH_INTERVAL    = 3600   # 1 hr cache
-BLACKOUT_MINUTES  = 15     # ±15 min ทั้งก่อนและหลังข่าว
+FF_URL           = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+FETCH_INTERVAL   = 14400  # 4 hours cache — prevents 429 rate limit
+BLACKOUT_MINUTES = 15
 
 _cache_lock = threading.Lock()
 _NEWS_CACHE: dict = {"data": None, "last_fetch": None}
@@ -18,7 +18,11 @@ _NEWS_CACHE: dict = {"data": None, "last_fetch": None}
 
 def _fetch_news() -> pd.DataFrame:
     try:
-        r = requests.get(FF_URL, timeout=12)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(FF_URL, timeout=12, headers=headers)
+        if r.status_code == 429:
+            print("[news_filter] rate limited (429) — using cached data")
+            return _NEWS_CACHE.get("data") or pd.DataFrame()
         r.raise_for_status()
         data = r.json()
         df   = pd.DataFrame(data)
@@ -29,12 +33,10 @@ def _fetch_news() -> pd.DataFrame:
         df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
         df = df.dropna(subset=["date"])
 
-        # กรอง USD เท่านั้น
         cur_col = "currency" if "currency" in df.columns else "country"
         if cur_col in df.columns:
             df = df[df[cur_col].astype(str).str.upper().isin(["USD", "US", "UNITED STATES"])]
 
-        # กรอง high impact (red)
         if "impact" in df.columns:
             df = df[df["impact"].astype(str).str.contains("high|red", case=False, na=False)]
 
@@ -45,11 +47,10 @@ def _fetch_news() -> pd.DataFrame:
 
     except Exception as e:
         print(f"[news_filter] fetch error: {e}")
-        return pd.DataFrame()
+        return _NEWS_CACHE.get("data") or pd.DataFrame()
 
 
 def get_news() -> pd.DataFrame:
-    global _NEWS_CACHE
     now_utc = datetime.now(timezone.utc)
     with _cache_lock:
         last = _NEWS_CACHE["last_fetch"]
@@ -77,7 +78,6 @@ def is_news_time(buffer_min: int = BLACKOUT_MINUTES) -> tuple[bool, str]:
             news_time = news_time.tz_localize("UTC")
         else:
             news_time = news_time.tz_convert("UTC")
-
         if (news_time - buf) <= now_utc <= (news_time + buf):
             return True, str(row["title"])
 

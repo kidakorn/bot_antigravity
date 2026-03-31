@@ -1,8 +1,6 @@
 """
-OpenClaw V7 — Watchdog (Windows VPS)
-ตรวจสอบ main.py ทุก 60 วินาที — restart อัตโนมัติถ้า crash
-จำกัด restart 10 ครั้ง/ชั่วโมง ป้องกัน crash loop
-แจ้ง Telegram ทุกครั้งที่ restart
+OpenClaw V7 - Watchdog (Windows VPS)
+Auto-restart main.py if crashed. Max 10 restarts/hour.
 """
 import os
 import subprocess
@@ -41,16 +39,17 @@ def _notify(msg: str):
 
 def _start() -> subprocess.Popen:
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[watchdog] {ts} — starting main.py")
+    print(f"[watchdog] {ts} - starting main.py")
     return subprocess.Popen(
-        [PYTHON_EXE, BOT_SCRIPT],
+        [PYTHON_EXE, "-u", BOT_SCRIPT],
         cwd=os.path.dirname(BOT_SCRIPT),
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
 def main():
-    print(f"[watchdog] เริ่มต้น | ดูแล: {BOT_SCRIPT}")
-    _notify("🐾 <b>Watchdog เริ่มทำงาน</b>\nOpenClaw V7 กำลังถูกดูแล")
+    print(f"[watchdog] started | watching: {BOT_SCRIPT}")
+    _notify("<b>OpenClaw V7 Watchdog started</b>\nBot is now being monitored.")
 
     proc = _start()
     restart_times: deque = deque()
@@ -59,21 +58,20 @@ def main():
         time.sleep(CHECK_EVERY_SEC)
         now = datetime.now()
 
-        # ลบ timestamp เก่ากว่า 1 ชม.
         cutoff = now - timedelta(hours=1)
         while restart_times and restart_times[0] < cutoff:
             restart_times.popleft()
 
         if proc.poll() is None:
-            continue  # ยังรันปกติ
+            continue
 
         exit_code = proc.returncode
-        print(f"[watchdog] {now.strftime('%H:%M:%S')} — main.py หยุด (exit={exit_code})")
+        print(f"[watchdog] {now.strftime('%H:%M:%S')} - main.py stopped (exit={exit_code})")
 
         if len(restart_times) >= MAX_RESTARTS_PER_HOUR:
-            msg = (f"🚨 <b>Watchdog หยุด restart</b>\n"
-                   f"crash {MAX_RESTARTS_PER_HOUR}x ใน 1 ชม.\n"
-                   f"กรุณาตรวจสอบ VPS ด้วยตัวเองครับ")
+            msg = (f"<b>Watchdog stopped restarting</b>\n"
+                   f"Crashed {MAX_RESTARTS_PER_HOUR}x in 1 hour.\n"
+                   f"Please check VPS manually.")
             print(f"[watchdog] {msg}")
             _notify(msg)
             time.sleep(3600)
@@ -83,9 +81,9 @@ def main():
         restart_times.append(now)
         n = len(restart_times)
 
-        _notify(f"⚠️ <b>Watchdog Restart #{n}</b>\n"
+        _notify(f"<b>Watchdog Restart #{n}</b>\n"
                 f"exit={exit_code} | {now.strftime('%H:%M:%S')}\n"
-                f"กำลัง restart main.py...")
+                f"Restarting main.py...")
 
         proc = _start()
 
