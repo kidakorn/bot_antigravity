@@ -16,7 +16,7 @@ HEADER_COLUMNS = [
     "timestamp", "symbol", "tf", "event",
     "balance", "equity", "margin_free", "drawdown_pct",
     "spread", "atr14", "vol_ratio",
-    "trades_today", "safe_mode", "safe_reason",
+    "trades_today", "m_level", "safe_mode", "safe_reason",
     "signal", "entry_type", "score", "reason",
     "close_price", "high_price", "low_price",
 ]
@@ -124,15 +124,25 @@ def trim_sheet_logs(
     creds_json: str,
     sheet_id: str,
     tab: str,
-    keep_last_rows: int = 1000,
+    keep_last_rows: int = 500,
 ) -> None:
     try:
         ws         = _open_ws(creds_json, sheet_id, tab)
         total      = len(ws.get_all_values())
         max_rows   = keep_last_rows + 1   # +1 for header
+        
         if total <= max_rows:
             return
-        to_delete  = total - max_rows
-        ws.delete_rows(2, to_delete + 1)
+            
+        to_delete = total - max_rows
+        
+        # Try batch deletion (Gspread 3.2.0+)
+        try:
+            ws.delete_rows(2, to_delete + 2) # Google API expects end_index (exclusive)
+        except Exception:
+            # Fallback for old gspread
+            for _ in range(to_delete):
+                ws.delete_row(2)
+
     except Exception as e:
         print(f"[sheets] trim error: {e}")

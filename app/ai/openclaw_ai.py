@@ -11,7 +11,7 @@ from datetime import datetime, time as dtime
 
 import pandas as pd
 
-from utils import atr, ema, rsi
+from app.utils.utils import atr, ema, rsi
 
 
 @dataclass

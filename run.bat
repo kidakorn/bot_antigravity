@@ -1,6 +1,6 @@
 @echo off
 title OpenClaw V7
-cd /d "C:\Users\Administrator\Desktop\bot_claude"
+cd /d "C:\Users\Administrator\Desktop\bot_antigravity"
 
 :: --- Start MT5 ---
 set "MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe"
@@ -18,6 +18,7 @@ if exist "%MT5_PATH%" (
 
 :: --- Start bot ---
 echo Starting OpenClaw V7...
+set PYTHONPATH=.
 start "OpenClaw-V7" /min cmd /c "python watchdog.py"
 
 echo.

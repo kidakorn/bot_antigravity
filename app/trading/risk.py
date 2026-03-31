@@ -1,6 +1,6 @@
 """
 OpenClaw V7 - Risk Calculator
-ปรับปรุง: ไม่ import config โดยตรง (ป้องกัน circular), รับ min/max lot เป็น param
+ปรับปรุง: ไม่ import app.config โดยตรง (ป้องกัน circular), รับ min/max lot เป็น param
 """
 import MetaTrader5 as mt5
 
@@ -11,6 +11,8 @@ def calc_lot(
     sl_points: int,
     min_lot: float = 0.01,
     max_lot: float = 100.0,
+    martingale_multiplier: float = 1.0,
+    martingale_level: int = 1,
 ) -> float:
     acc  = mt5.account_info()
     info = mt5.symbol_info(symbol)
@@ -35,6 +37,11 @@ def calc_lot(
         return min_lot
 
     lot  = risk_money / loss_per_lot
+    
+    # Apply Martingale
+    if martingale_level > 1:
+        lot = lot * (martingale_multiplier ** (martingale_level - 1))
+
     step = float(info.volume_step)
     if step > 0:
         lot = round(lot / step) * step

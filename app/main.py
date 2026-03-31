@@ -14,16 +14,16 @@ from datetime import time as dtime
 
 import MetaTrader5 as mt5
 
-import config as cfg
-from analytics import (
+import app.config as cfg
+from app.data.analytics import (
     build_signal_context,
     compute_dynamic_trade_params,
     log_health_snapshot,
     scan_closed_trades,
     summarize_day,
 )
-from bot_state import BotState
-from mt5_client import (
+from app.core.bot_state import BotState
+from app.core.mt5_client import (
     connect,
     ensure_symbol,
     get_rates,
@@ -32,19 +32,19 @@ from mt5_client import (
     spread_points,
     today_deals_profit,
 )
-from news_filter import is_news_time
-from notifier import notify_telegram
-from openclaw_ai import openclaw_ai_evaluate
-from openclaw_v4 import is_in_news_blackout, trail_positions_atr
-from risk import calc_lot, sl_tp_from_points
-from sheets_logger import (
+from app.data.news_filter import is_news_time
+from app.utils.notifier import notify_telegram
+from app.ai.openclaw_ai import openclaw_ai_evaluate
+from app.trading.openclaw_v4 import is_in_news_blackout, trail_positions_atr
+from app.trading.risk import calc_lot, sl_tp_from_points
+from app.data.sheets_logger import (
     append_log,
     ensure_sheet_header,
     start_log_worker,
     trim_sheet_logs,
 )
-from strategy import assess_htf_trend, decide_signal
-from utils import safe_float
+from app.trading.strategy import assess_htf_trend, decide_signal
+from app.utils.utils import safe_float
 
 STATE = BotState.load_or_new()
 LAST_MARKET_STATUS: str | None = None
@@ -417,8 +417,10 @@ def main():
                             partial_taken_positions=STATE.partial_taken_positions,
                         )
                         STATE.mark_trail(now)
-                time.sleep(cfg.TRAILING_CHECK_EVERY_SEC)
-                continue
+                        
+                if len(positions) >= getattr(cfg, "MAX_OPEN_TRADES", 1):
+                    time.sleep(cfg.TRAILING_CHECK_EVERY_SEC)
+                    continue
 
             # 10. Max trades
             if STATE.trades_today >= cfg.MAX_TRADES_PER_DAY:
@@ -429,8 +431,10 @@ def main():
                 continue
 
             # ── Candle Close Wait ──────────────────
-            # รอให้ candle M15 เกือบปิดก่อน evaluate signal
-            tf_min = 15  # M15
+            # รอให้ candle เกือบปิดก่อน evaluate signal
+            import re
+            m = re.search(r'\d+', cfg.TIMEFRAME)
+            tf_min = int(m.group()) if m else 5
             remaining = _seconds_to_candle_close(now, tf_min)
             if remaining > cfg.CANDLE_CLOSE_WAIT_SEC:
                 # ยังไม่ถึงเวลา — sleep ไปก่อน
@@ -480,7 +484,7 @@ def main():
                 continue
 
             # 13. Duplicate
-            bars_min = cfg.SAME_DIRECTION_REENTRY_BARS * 15
+            bars_min = cfg.SAME_DIRECTION_REENTRY_BARS * tf_min
             if STATE.is_duplicate_setup(sig.setup_key, now, bars_min):
                 if cfg.LOG_DUPLICATE_SETUP and STATE.should_log("dup_setup", 60):
                     log_event({"event": "duplicate_setup",
@@ -541,13 +545,22 @@ def main():
                 time.sleep(10)
                 continue
 
-            lot   = calc_lot(cfg.SYMBOL, cfg.RISK_PCT, sl_pts, cfg.MIN_LOT, cfg.MAX_LOT)
+            # Martingale tracking
+            same_dir_pos = [p for p in (positions or []) if (p.type == mt5.POSITION_TYPE_BUY and sig.action == "BUY") or (p.type == mt5.POSITION_TYPE_SELL and sig.action == "SELL")]
+            m_level = min(len(same_dir_pos) + 1, getattr(cfg, "MARTINGALE_MAX_LEVELS", 5))
+
+            lot   = calc_lot(
+                cfg.SYMBOL, cfg.RISK_PCT, sl_pts, cfg.MIN_LOT, cfg.MAX_LOT,
+                martingale_multiplier=getattr(cfg, "MARTINGALE_MULTIPLIER", 1.0),
+                martingale_level=m_level,
+            )
             lot   = _normalize_volume(lot, info_sym)
             entry = tick_sym.ask if sig.action == "BUY" else tick_sym.bid
             sl, tp = sl_tp_from_points(entry, sig.action, sl_pts, tp_pts,
                                         float(info_sym.point))
 
             log_event({
+                "m_level":     m_level,
                 "event":       "trade_attempt",
                 "signal":      sig.action,
                 "entry_type":  sig.entry_type,
@@ -577,7 +590,7 @@ def main():
                 notify_telegram(
                     cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
                     (f"<b>OPEN {sig.action}</b> {cfg.SYMBOL}\n"
-                     f"type={sig.entry_type} | lot={lot} | score={final_score}\n"
+                     f"type={sig.entry_type} | lot={lot} (Lv{m_level}) | score={final_score}\n"
                      f"SL x{dyn['sl_atr_mult']} | RR={dyn['tp_rr']} | {sig.reason}")
                 )
             else:

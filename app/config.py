@@ -16,18 +16,22 @@ load_dotenv()
 
 # ── Instrument ────────────────────────────────
 SYMBOL            : str   = "XAUUSDc"
-TIMEFRAME         : str   = "M15"
+TIMEFRAME         : str   = "M5"
 HTF_TIMEFRAME     : str   = "H4"
-MAGIC             : int   = 20260324
+MAGIC             : int   = 20260331
 
 # ── Risk ──────────────────────────────────────
 RISK_PCT          : float = 0.020   # 2% -> ~34 USC lot
 MIN_LOT           : float = 0.01
 MAX_LOT           : float = 1.00
 MAX_SPREAD_POINTS : int   = 400
-MAX_OPEN_TRADES   : int   = 1
-MAX_TRADES_PER_DAY: int   = 8
+MAX_OPEN_TRADES   : int   = 5
+MAX_TRADES_PER_DAY: int   = 50
 COOLDOWN_MINUTES  : int   = 0
+
+# ── Martingale ────────────────────────────────
+MARTINGALE_MULTIPLIER : float = 1.5
+MARTINGALE_MAX_LEVELS : int   = 5
 
 MAX_DAILY_LOSS_PCT       : float = 0.05
 EQUITY_DRAWDOWN_STOP_PCT : float = 0.10
@@ -40,7 +44,7 @@ LOSS_STREAK_PAUSE_MINUTES : int = 120
 # ── Entry Quality ─────────────────────────────
 REQUIRE_NEW_SETUP           : bool = True
 SAME_DIRECTION_REENTRY_BARS : int  = 1
-MIN_SCORE_TO_TRADE          : int  = 50
+MIN_SCORE_TO_TRADE          : int  = 30
 
 # ── Candle Close Wait ─────────────────────────
 CANDLE_CLOSE_WAIT_SEC : int = 5  # เข้าได้เมื่อเหลือ < 5 วิก่อน candle close
@@ -51,7 +55,7 @@ BOUNCE_GUARD_ATR_MULT : float = 2.0
 
 # ── SL/TP ─────────────────────────────────────
 SL_ATR_MULT : float = 1.50
-TP_RR       : float = 1.50
+TP_RR       : float = 1.00
 
 # ── Strategy ──────────────────────────────────
 PULLBACK_ZONE_ATR_MULT     : float = 1.60
@@ -71,10 +75,10 @@ CONTINUATION_RSI_SELL_MAX : int = 55
 TRAILING_ENABLED        : bool  = True
 TRAILING_ATR_MULT       : float = 0.65
 TRAILING_CHECK_EVERY_SEC: int   = 15
-TRAILING_START_ATR      : float = 0.60
+TRAILING_START_ATR      : float = 0.40
 
 BREAKEVEN_ENABLED     : bool  = True
-BREAKEVEN_TRIGGER_ATR : float = 0.45
+BREAKEVEN_TRIGGER_ATR : float = 0.30
 BREAKEVEN_LOCK_POINTS : int   = 20
 
 PARTIAL_TP_ENABLED   : bool  = True
@@ -104,10 +108,10 @@ NEWS_BUFFER_MIN_AFTER  : int  = 30
 # ── Google Sheets ─────────────────────────────
 SHEET_ID           : str  = os.getenv("OPENCLAW_SHEET_ID", "")
 SHEET_TAB          : str  = os.getenv("OPENCLAW_SHEET_TAB", "Sheet1")
-BASE_DIR           : str  = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR           : str  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOOGLE_CREDS_JSON  : str  = os.path.join(BASE_DIR, "service_account.json")
 SHEET_AUTO_TRIM    : bool = True
-SHEET_KEEP_LAST_ROWS: int = 1000
+SHEET_KEEP_LAST_ROWS: int = 500
 
 # ── Telegram ──────────────────────────────────
 NOTIFY_ENABLED     : bool = os.getenv("OPENCLAW_NOTIFY_ENABLED", "true").lower() == "true"
@@ -127,15 +131,15 @@ CLOSED_TRADE_SCAN_EVERY_SEC : int  = 30
 DAILY_SUMMARY_ON_ROLLOVER   : bool = True
 
 LOG_NO_SETUP        : bool = False  # ปิด no_setup log ลดขยะ
-LOG_BLOCKED_AI      : bool = True
-LOG_BLOCKED_SCORE   : bool = True
-LOG_SKIP_SPREAD     : bool = True
-LOG_HEALTH_SNAPSHOT : bool = True
-LOG_NEWS_BLOCK      : bool = True
+LOG_BLOCKED_AI      : bool = False  # ปิดโชว์เหตุผลที่ AI บล็อก
+LOG_BLOCKED_SCORE   : bool = False  # ปิดโชว์ที่เข้าไม่ได้เพราะคะแนนน้อย
+LOG_SKIP_SPREAD     : bool = False  # ปิดสแปมเรื่อง Spread ถ่าง
+LOG_HEALTH_SNAPSHOT : bool = False  # ปิดการบันทึกสถานะพอร์ตรายชั่วโมงออโต้เพื่อประหยัดบรรทัด
+LOG_NEWS_BLOCK      : bool = False
 LOG_TRAIL_UPDATES   : bool = True
 LOG_PARTIAL_TP      : bool = True
-LOG_PAUSE_STATE     : bool = True
-LOG_BLOCKED_HTF     : bool = True
-LOG_DUPLICATE_SETUP : bool = True
+LOG_PAUSE_STATE     : bool = False
+LOG_BLOCKED_HTF     : bool = False
+LOG_DUPLICATE_SETUP : bool = False
 LOG_MARKET_STATUS   : bool = True
 LOG_COOLDOWN        : bool = False

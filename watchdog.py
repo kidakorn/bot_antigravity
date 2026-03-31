@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_SCRIPT            = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
+APP_MODULE          = "app.main"
 PYTHON_EXE            = sys.executable
 CHECK_EVERY_SEC       = 60
 MAX_RESTARTS_PER_HOUR = 10
@@ -41,14 +41,14 @@ def _start() -> subprocess.Popen:
     ts = datetime.now().strftime("%H:%M:%S")
     print(f"[watchdog] {ts} - starting main.py")
     return subprocess.Popen(
-        [PYTHON_EXE, "-u", BOT_SCRIPT],
-        cwd=os.path.dirname(BOT_SCRIPT),
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        [PYTHON_EXE, "-u", "-m", APP_MODULE],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONPATH": "."},
     )
 
 
 def main():
-    print(f"[watchdog] started | watching: {BOT_SCRIPT}")
+    print(f"[watchdog] started | watching: {APP_MODULE}")
     _notify("<b>OpenClaw V7 Watchdog started</b>\nBot is now being monitored.")
 
     proc = _start()

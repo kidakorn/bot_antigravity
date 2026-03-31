@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import MetaTrader5 as mt5
 import pandas as pd
 
-from utils import atr
+from app.utils.utils import atr
 
 
 # ─────────────────────────────────────────────

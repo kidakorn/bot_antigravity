@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import MetaTrader5 as mt5
 import pandas as pd
 
-from utils import atr, ema, rsi, safe_float
+from app.utils.utils import atr, ema, rsi, safe_float
 
 
 # ─────────────────────────────────────────────

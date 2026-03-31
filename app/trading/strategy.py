@@ -11,7 +11,7 @@ v7.2:
 from dataclasses import dataclass
 import pandas as pd
 
-from config import (
+from app.config import (
     BOUNCE_GUARD_ATR_MULT,
     BOUNCE_GUARD_BARS,
     CONTINUATION_RSI_BUY_MAX,
@@ -25,7 +25,7 @@ from config import (
     PULLBACK_RSI_SELL_MIN,
     PULLBACK_ZONE_ATR_MULT,
 )
-from utils import atr, ema, macd, rsi, safe_float
+from app.utils.utils import atr, ema, macd, rsi, safe_float
 
 
 @dataclass
