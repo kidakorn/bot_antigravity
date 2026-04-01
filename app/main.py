@@ -397,7 +397,7 @@ def main():
                 if STATE.can_trail(now, cfg.TRAILING_CHECK_EVERY_SEC):
                     info_sym = mt5.symbol_info(cfg.SYMBOL)
                     if info_sym:
-                        df_m  = get_rates(cfg.SYMBOL, cfg.TIMEFRAME, 300)
+                        df_m  = get_rates(cfg.SYMBOL, getattr(cfg, "TIMEFRAME", "M5"), 300)
                         dyn_m = compute_dynamic_trade_params(
                             df=df_m, entry_type="continuation", final_score=65,
                             point=float(info_sym.point),
@@ -418,15 +418,57 @@ def main():
                         )
                         STATE.mark_trail(now)
                         
+                # --- Grid Martingale Entry (ไม้แก้ตามระยะ) ---
+                if len(positions) < getattr(cfg, "MAX_OPEN_TRADES", 1):
+                    last_pos = sorted(positions, key=lambda p: p.time)[-1]
+                    info_sym = mt5.symbol_info(cfg.SYMBOL)
+                    tick_sym = mt5.symbol_info_tick(cfg.SYMBOL)
+                    step_points = getattr(cfg, "MARTINGALE_STEP_POINTS", 150)
+                    
+                    if info_sym and tick_sym and step_points > 0:
+                        point = float(info_sym.point)
+                        dist = 0.0
+                        action = "BUY" if last_pos.type == mt5.POSITION_TYPE_BUY else "SELL"
+                        
+                        if action == "BUY":
+                            dist = (last_pos.price_open - tick_sym.ask) / point
+                        else:
+                            dist = (tick_sym.bid - last_pos.price_open) / point
+                            
+                        if dist >= step_points:
+                            df_grid = get_rates(cfg.SYMBOL, getattr(cfg, "TIMEFRAME", "M5"), 300)
+                            dyn_grid = compute_dynamic_trade_params(
+                                df=df_grid, entry_type="grid", final_score=50,
+                                point=point, fallback_sl_mult=cfg.SL_ATR_MULT, fallback_tp_rr=cfg.TP_RR,
+                            )
+                            m_level = len(positions) + 1
+                            lot = calc_lot(
+                                cfg.SYMBOL, cfg.RISK_PCT, int(dyn_grid["sl_points"]), cfg.MIN_LOT, cfg.MAX_LOT,
+                                martingale_multiplier=getattr(cfg, "MARTINGALE_MULTIPLIER", 1.5),
+                                martingale_level=m_level,
+                            )
+                            lot = _normalize_volume(lot, info_sym)
+                            entry_price = tick_sym.ask if action == "BUY" else tick_sym.bid
+                            sl_pts, tp_pts = int(dyn_grid["sl_points"]), int(dyn_grid["tp_points"])
+                            sl, tp = sl_tp_from_points(entry_price, action, sl_pts, tp_pts, point)
+                            
+                            res, status = place_order(action, lot, sl, tp, dyn_grid["atr14"])
+                            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                STATE.mark_trade(now)
+                                log_event({"event": "trade_opened", "signal": action, "entry_type": "grid", "score": dist, "reason": "grid_recovery", "m_level": m_level})
+                                notify_telegram(cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
+                                    f"<b>GRID {action}</b> {cfg.SYMBOL}\nLv{m_level} | lot={lot} | dist={dist:.1f} pts\nSL={sl} TP={tp}")
+                                time.sleep(15)
+                                continue
+
                 if len(positions) >= getattr(cfg, "MAX_OPEN_TRADES", 1):
                     time.sleep(cfg.TRAILING_CHECK_EVERY_SEC)
                     continue
 
             # 10. Max trades
-            if STATE.trades_today >= cfg.MAX_TRADES_PER_DAY:
+            if STATE.trades_today >= getattr(cfg, "MAX_TRADES_PER_DAY", 50):
                 if STATE.should_log("max_trades", 600):
-                    log_event({"event": "max_trades_reached",
-                               "trades_today": STATE.trades_today})
+                    log_event({"event": "max_trades_reached", "trades_today": STATE.trades_today})
                 smart_sleep(now, 60)
                 continue
 

@@ -32,6 +32,8 @@ COOLDOWN_MINUTES  : int   = 0
 # ── Martingale ────────────────────────────────
 MARTINGALE_MULTIPLIER : float = 1.5
 MARTINGALE_MAX_LEVELS : int   = 5
+MARTINGALE_STEP_POINTS: int   = 150
+
 
 MAX_DAILY_LOSS_PCT       : float = 0.05
 EQUITY_DRAWDOWN_STOP_PCT : float = 0.10
@@ -44,7 +46,7 @@ LOSS_STREAK_PAUSE_MINUTES : int = 120
 # ── Entry Quality ─────────────────────────────
 REQUIRE_NEW_SETUP           : bool = True
 SAME_DIRECTION_REENTRY_BARS : int  = 1
-MIN_SCORE_TO_TRADE          : int  = 30
+MIN_SCORE_TO_TRADE          : int  = 20
 
 # ── Candle Close Wait ─────────────────────────
 CANDLE_CLOSE_WAIT_SEC : int = 5  # เข้าได้เมื่อเหลือ < 5 วิก่อน candle close
@@ -87,7 +89,7 @@ PARTIAL_TP_CLOSE_PCT : float = 0.50
 
 # ── AI / Session UTC+8 ────────────────────────
 OPENCLAW_AI_ENABLED : bool = True
-AI_SESSION_FILTER   : bool = True
+AI_SESSION_FILTER   : bool = False
 AI_REGIME_FILTER    : bool = True
 AI_VOL_FILTER       : bool = True
 AI_TREND_STRENGTH   : bool = True
@@ -100,7 +102,7 @@ AI_NY_START_HHMM     : tuple = (20, 30)
 AI_NY_END_HHMM       : tuple = (23, 59)
 
 # ── News Blackout ─────────────────────────────
-NEWS_BLACKOUT_ENABLED  : bool = True
+NEWS_BLACKOUT_ENABLED  : bool = False
 NEWS_BLACKOUT_WINDOWS  : list = []
 NEWS_BUFFER_MIN_BEFORE : int  = 15
 NEWS_BUFFER_MIN_AFTER  : int  = 30
@@ -134,7 +136,7 @@ LOG_NO_SETUP        : bool = False  # ปิด no_setup log ลดขยะ
 LOG_BLOCKED_AI      : bool = False  # ปิดโชว์เหตุผลที่ AI บล็อก
 LOG_BLOCKED_SCORE   : bool = False  # ปิดโชว์ที่เข้าไม่ได้เพราะคะแนนน้อย
 LOG_SKIP_SPREAD     : bool = False  # ปิดสแปมเรื่อง Spread ถ่าง
-LOG_HEALTH_SNAPSHOT : bool = False  # ปิดการบันทึกสถานะพอร์ตรายชั่วโมงออโต้เพื่อประหยัดบรรทัด
+LOG_HEALTH_SNAPSHOT : bool = True   # เปิดให้เห็นชีวิตบอท
 LOG_NEWS_BLOCK      : bool = False
 LOG_TRAIL_UPDATES   : bool = True
 LOG_PARTIAL_TP      : bool = True
