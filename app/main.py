@@ -339,18 +339,19 @@ def main():
                 time.sleep(30)
                 continue
 
-            # 6. News
-            manual_block, manual_reason = is_in_news_blackout(
-                now, cfg.NEWS_BLACKOUT_ENABLED, cfg.NEWS_BLACKOUT_WINDOWS,
-                cfg.NEWS_BUFFER_MIN_BEFORE, cfg.NEWS_BUFFER_MIN_AFTER,
-            )
-            api_block, api_title = is_news_time(cfg.NEWS_BUFFER_MIN_BEFORE)
-            if manual_block or api_block:
-                if cfg.LOG_NEWS_BLOCK and STATE.should_log("news_block", 300):
-                    log_event({"event": "halt_news",
-                               "reason": manual_reason if manual_block else api_title})
-                time.sleep(60)
-                continue
+            # 6. News (ใช้สวิตช์ NEWS_BLACKOUT_ENABLED ควบคุมทั้ง 2 ระบบ)
+            if cfg.NEWS_BLACKOUT_ENABLED:
+                manual_block, manual_reason = is_in_news_blackout(
+                    now, cfg.NEWS_BLACKOUT_ENABLED, cfg.NEWS_BLACKOUT_WINDOWS,
+                    cfg.NEWS_BUFFER_MIN_BEFORE, cfg.NEWS_BUFFER_MIN_AFTER,
+                )
+                api_block, api_title = is_news_time(cfg.NEWS_BUFFER_MIN_BEFORE)
+                if manual_block or api_block:
+                    if cfg.LOG_NEWS_BLOCK and STATE.should_log("news_block", 300):
+                        log_event({"event": "halt_news",
+                                   "reason": manual_reason if manual_block else api_title})
+                    time.sleep(60)
+                    continue
 
             # 7. Spread
             sp = spread_points(cfg.SYMBOL)
@@ -418,12 +419,12 @@ def main():
                         )
                         STATE.mark_trail(now)
                         
-                # --- Grid Martingale Entry (ไม้แก้ตามระยะ) ---
+                # --- Smart Grid Martingale (ไม้แก้ + วิเคราะห์กราฟก่อนเข้า) ---
                 if len(positions) < getattr(cfg, "MAX_OPEN_TRADES", 1):
                     last_pos = sorted(positions, key=lambda p: p.time)[-1]
                     info_sym = mt5.symbol_info(cfg.SYMBOL)
                     tick_sym = mt5.symbol_info_tick(cfg.SYMBOL)
-                    step_points = getattr(cfg, "MARTINGALE_STEP_POINTS", 150)
+                    step_points = getattr(cfg, "MARTINGALE_STEP_POINTS", 500)
                     
                     if info_sym and tick_sym and step_points > 0:
                         point = float(info_sym.point)
@@ -436,32 +437,56 @@ def main():
                             dist = (tick_sym.bid - last_pos.price_open) / point
                             
                         if dist >= step_points:
+                            # ★ Smart Grid: วิเคราะห์กราฟก่อนเปิดไม้แก้
                             df_grid = get_rates(cfg.SYMBOL, getattr(cfg, "TIMEFRAME", "M5"), 300)
-                            dyn_grid = compute_dynamic_trade_params(
-                                df=df_grid, entry_type="grid", final_score=50,
-                                point=point, fallback_sl_mult=cfg.SL_ATR_MULT, fallback_tp_rr=cfg.TP_RR,
-                            )
-                            m_level = len(positions) + 1
-                            lot = calc_lot(
-                                cfg.SYMBOL, cfg.RISK_PCT, int(dyn_grid["sl_points"]), cfg.MIN_LOT, cfg.MAX_LOT,
-                                martingale_multiplier=getattr(cfg, "MARTINGALE_MULTIPLIER", 1.5),
-                                martingale_level=m_level,
-                            )
-                            lot = _normalize_volume(lot, info_sym)
-                            entry_price = tick_sym.ask if action == "BUY" else tick_sym.bid
-                            sl_pts, tp_pts = int(dyn_grid["sl_points"]), int(dyn_grid["tp_points"])
-                            sl, tp = sl_tp_from_points(entry_price, action, sl_pts, tp_pts, point)
+                            from app.utils.utils import ema as _ema
+                            _e20 = _ema(df_grid["close"], 20)
+                            _e50 = _ema(df_grid["close"], 50)
+                            _e20_v = float(_e20.iloc[-2])
+                            _e50_v = float(_e50.iloc[-2])
                             
-                            res, status = place_order(action, lot, sl, tp, dyn_grid["atr14"])
-                            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                                STATE.mark_trade(now)
-                                log_event({"event": "trade_opened", "signal": action, "entry_type": "grid", "score": dist, "reason": "grid_recovery", "m_level": m_level})
-                                notify_telegram(cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
-                                    f"<b>GRID {action}</b> {cfg.SYMBOL}\nLv{m_level} | lot={lot} | dist={dist:.1f} pts\nSL={sl} TP={tp}")
-                                time.sleep(15)
-                                continue
+                            # ถ้า EMA พลิกสวนทางกับไม้เดิม → ไม่เปิดไม้แก้!
+                            ema_supports = (action == "BUY" and _e20_v > _e50_v) or \
+                                           (action == "SELL" and _e20_v < _e50_v)
+                            
+                            if not ema_supports:
+                                if cfg.LOG_BLOCKED_HTF and STATE.should_log("grid_blocked", 120):
+                                    log_event({"event": "grid_blocked_ema", "signal": action,
+                                               "reason": f"EMA flipped: e20={_e20_v:.2f} e50={_e50_v:.2f}",
+                                               "m_level": len(positions) + 1})
+                            else:
+                                dyn_grid = compute_dynamic_trade_params(
+                                    df=df_grid, entry_type="grid", final_score=50,
+                                    point=point, fallback_sl_mult=cfg.SL_ATR_MULT, fallback_tp_rr=cfg.TP_RR,
+                                )
+                                m_level = len(positions) + 1
+                                lot = calc_lot(
+                                    cfg.SYMBOL, cfg.RISK_PCT, int(dyn_grid["sl_points"]), cfg.MIN_LOT, cfg.MAX_LOT,
+                                    martingale_multiplier=getattr(cfg, "MARTINGALE_MULTIPLIER", 1.5),
+                                    martingale_level=m_level,
+                                )
+                                lot = _normalize_volume(lot, info_sym)
+                                # ★ เพดาน Lot ห้ามเกิน MAX_GRID_LOT
+                                max_grid_lot = getattr(cfg, "MAX_GRID_LOT", 0.10)
+                                if lot > max_grid_lot:
+                                    lot = max_grid_lot
+                                entry_price = tick_sym.ask if action == "BUY" else tick_sym.bid
+                                sl_pts, tp_pts = int(dyn_grid["sl_points"]), int(dyn_grid["tp_points"])
+                                sl, tp = sl_tp_from_points(entry_price, action, sl_pts, tp_pts, point)
+                                
+                                res, status = place_order(action, lot, sl, tp, dyn_grid["atr14"])
+                                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                    STATE.mark_trade(now)
+                                    log_event({"event": "trade_opened", "signal": action, "entry_type": "grid", "score": dist, "reason": "grid_recovery", "m_level": m_level, "lot": lot})
+                                    notify_telegram(cfg.NOTIFY_ENABLED, cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID,
+                                        f"<b>GRID {action}</b> {cfg.SYMBOL}\nLv{m_level} | lot={lot} | dist={dist:.1f} pts\nSL={sl} TP={tp}")
+                                    time.sleep(15)
+                                    continue
 
-                if len(positions) >= getattr(cfg, "MAX_OPEN_TRADES", 1):
+                # ★ เช็คโควต้าเฉพาะเทรดปกติ (เหลือ 1 ช่องให้ไม้แก้เสมอ)
+                max_normal = max(getattr(cfg, "MAX_OPEN_TRADES", 1) - 1, 1)
+                if len(positions) >= max_normal:
+                    # ยังมีช่อง grid ว่าง แต่ช่องเทรดปกติเต็มแล้ว
                     time.sleep(cfg.TRAILING_CHECK_EVERY_SEC)
                     continue
 
@@ -499,31 +524,25 @@ def main():
                 time.sleep(15)
                 continue
 
-            # 12. HTF H4 filter
+            # 12. HTF H4 filter (เปลี่ยนจากบล็อกเด็ดขาด → หักคะแนนแทน)
             htf_penalty = 0
             if htf.mode == "NONE":
-                if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_none", 120):
-                    log_event({"event": "blocked_htf_none", "signal": sig.action,
-                               "reason": htf.reason, **ctx})
-                time.sleep(15)
-                continue
+                htf_penalty = -5  # ไม่บล็อก แค่หักคะแนน
 
             if htf.mode == "NEUTRAL":
                 htf_penalty = -5
 
             if sig.action == "BUY" and htf.mode == "SELL_ONLY":
+                htf_penalty = -15  # สวนทาง H4 หักหนัก แต่ไม่บล็อก
                 if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_conflict", 120):
-                    log_event({"event": "blocked_htf_conflict", "signal": "BUY",
-                               "htf": htf.mode, **ctx})
-                time.sleep(15)
-                continue
+                    log_event({"event": "htf_penalty", "signal": "BUY",
+                               "htf": htf.mode, "penalty": htf_penalty, **ctx})
 
             if sig.action == "SELL" and htf.mode == "BUY_ONLY":
+                htf_penalty = -15  # สวนทาง H4 หักหนัก แต่ไม่บล็อก
                 if cfg.LOG_BLOCKED_HTF and STATE.should_log("htf_conflict", 120):
-                    log_event({"event": "blocked_htf_conflict", "signal": "SELL",
-                               "htf": htf.mode, **ctx})
-                time.sleep(15)
-                continue
+                    log_event({"event": "htf_penalty", "signal": "SELL",
+                               "htf": htf.mode, "penalty": htf_penalty, **ctx})
 
             # 13. Duplicate
             bars_min = cfg.SAME_DIRECTION_REENTRY_BARS * tf_min

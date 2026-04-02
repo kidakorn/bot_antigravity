@@ -161,8 +161,8 @@ def decide_signal(df: pd.DataFrame) -> Signal:
     bull_candle = c_v > o_v
     bear_candle = c_v < o_v
 
-    trend_up   = e20_v > e50_v and c_v > e200_v
-    trend_down = e20_v < e50_v and c_v < e200_v
+    trend_up   = e20_v > e50_v  # ตัด EMA200 ออก ให้เข้าง่ายขึ้น
+    trend_down = e20_v < e50_v
     sl50       = _ema_slope(close, 50)
 
     # Sideway check
@@ -201,25 +201,23 @@ def decide_signal(df: pd.DataFrame) -> Signal:
     # ── Setups ────────────────────────────────
     cont_buy = (
         trend_up and macd_bull and near_ema20
-        and bull_candle and body_ratio >= 0.10
-        and c_v >= ph_v
+        and bull_candle and body_ratio >= 0.05
         and CONTINUATION_RSI_BUY_MIN <= rsi_v <= CONTINUATION_RSI_BUY_MAX
     )
     cont_sell = (
         trend_down and macd_bear and near_ema20
-        and bear_candle and body_ratio >= 0.10
-        and c_v <= pl_v
+        and bear_candle and body_ratio >= 0.05
         and CONTINUATION_RSI_SELL_MIN <= rsi_v <= CONTINUATION_RSI_SELL_MAX
     )
     pull_buy = (
         trend_up and macd_bull and near_ema50
-        and bull_candle and body_ratio >= 0.10
+        and bull_candle and body_ratio >= 0.05
         and c_v > pc_v
         and PULLBACK_RSI_BUY_MIN <= rsi_v <= PULLBACK_RSI_BUY_MAX
     )
     pull_sell = (
         trend_down and macd_bear and near_ema50
-        and bear_candle and body_ratio >= 0.10
+        and bear_candle and body_ratio >= 0.05
         and c_v < pc_v
         and PULLBACK_RSI_SELL_MIN <= rsi_v <= PULLBACK_RSI_SELL_MAX
     )
