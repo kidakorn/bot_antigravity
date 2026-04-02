@@ -43,6 +43,7 @@ MAX_CONSECUTIVE_LOSS     : int   = 5      # ขยายจาก 3 เป็น
 # ── Pause Protection ──────────────────────────
 LOSS_STREAK_PAUSE_COUNT   : int = 10   # แพ้ติด 10 ครั้งถึงพัก (จาก 3)
 LOSS_STREAK_PAUSE_MINUTES : int = 15   # พักแค่ 15 นาที (จาก 120)
+PROFIT_LOCK_PCT           : float = 0.50  # ★ ล็อก 50% ของกำไรสูงสุดวันนี้
 
 # ── Entry Quality ─────────────────────────────
 REQUIRE_NEW_SETUP           : bool = True

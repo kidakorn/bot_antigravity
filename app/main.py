@@ -392,6 +392,26 @@ def main():
                 time.sleep(30)
                 continue
 
+            # ★ Profit Trailing Stop (ล็อกกำไร 50%)
+            profit_lock_pct = getattr(cfg, "PROFIT_LOCK_PCT", 0.50)
+            if profit_today > 0:
+                # อัปเดทจุดสูงสุดของกำไรวันนี้
+                if not hasattr(STATE, '_peak_profit_today'):
+                    STATE._peak_profit_today = 0.0
+                if profit_today > STATE._peak_profit_today:
+                    STATE._peak_profit_today = profit_today
+            
+            if hasattr(STATE, '_peak_profit_today') and STATE._peak_profit_today > 0:
+                min_keep = STATE._peak_profit_today * profit_lock_pct
+                if profit_today < min_keep:
+                    if STATE.should_log("profit_lock", 300):
+                        log_event({"event": "profit_lock_pause",
+                                   "peak_profit": round(STATE._peak_profit_today, 2),
+                                   "current_profit": round(profit_today, 2),
+                                   "min_keep": round(min_keep, 2)})
+                    time.sleep(60)
+                    continue
+
             # 9. Position management
             positions = positions_by_magic(cfg.SYMBOL, cfg.MAGIC)
             if positions:
